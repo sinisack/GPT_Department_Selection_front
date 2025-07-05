@@ -23,6 +23,7 @@ const MapPage = () => {
   const [selectedHospital, setSelectedHospital] = useState(null);
   const [eta, setEta] = useState(null);
   const [error, setError] = useState("");
+  const [hospitalList, setHospitalList] = useState(recommendedHospitals);
 
   useEffect(() => {
     if (!symptom || !department || !userLocation) return;
@@ -48,7 +49,7 @@ const MapPage = () => {
       image: userMarkerImage
     });
 
-    recommendedHospitals.forEach(h => {
+    hospitalList.forEach(h => {
       if (!h.x || !h.y) return;
       const pos = new kakao.maps.LatLng(Number(h.y), Number(h.x));
       const marker = new kakao.maps.Marker({
@@ -61,28 +62,34 @@ const MapPage = () => {
       });
       info.open(map, marker);
 
-      // 마커 클릭 시 길찾기 자동 실행
       kakao.maps.event.addListener(marker, "click", () => {
         handleRoute({
           ...h,
           lat: Number(h.y),
           lng: Number(h.x)
-        });
+        }, true); // isFromMarker = true
       });
     });
 
     const bounds = new kakao.maps.LatLngBounds();
     bounds.extend(center);
-    recommendedHospitals.forEach(h => {
+    hospitalList.forEach(h => {
       if (!h.y || !h.x) return;
       bounds.extend(new kakao.maps.LatLng(Number(h.y), Number(h.x)));
     });
     map.setBounds(bounds);
 
-  }, [recommendedHospitals, userLocation, symptom, department]);
+  }, [hospitalList, userLocation, symptom, department]);
 
-  const handleRoute = async (hospital) => {
+  const handleRoute = async (hospital, isFromMarker = false) => {
     setSelectedHospital(hospital);
+
+    if (isFromMarker) {
+      setHospitalList(prev => {
+        const filtered = prev.filter(hh => hh.placeName !== hospital.placeName);
+        return [hospital, ...filtered];
+      });
+    }
 
     if (!window.kakao || !mapRef.current) return;
     const kakao = window.kakao;
@@ -123,8 +130,8 @@ const MapPage = () => {
         });
 
         setEta({
-          distance: (section.distance/1000).toFixed(1),
-          duration: Math.ceil(section.duration/60),
+          distance: (section.distance / 1000).toFixed(1),
+          duration: Math.ceil(section.duration / 60),
         });
 
         setError("");
@@ -133,6 +140,52 @@ const MapPage = () => {
       console.error(err);
       setError("길찾기 요청 실패");
     }
+  };
+
+  // 평일/주말 묶기
+  const formatOpeningHours = (openingHours) => {
+    if (!openingHours) return ["영업시간 정보 없음"];
+
+    const lines = openingHours.split(" / ");
+    let weekdayTimes = [];
+    let weekendTimes = [];
+    let sundayTime = null;
+
+    lines.forEach(line => {
+      const [day, time] = line.split(": ");
+      switch (day) {
+        case "Monday":
+        case "Tuesday":
+        case "Wednesday":
+        case "Thursday":
+        case "Friday":
+          weekdayTimes.push(time);
+          break;
+        case "Saturday":
+          weekendTimes.push(`토요일: ${time}`);
+          break;
+        case "Sunday":
+          sundayTime = time;
+          break;
+        default:
+          break;
+      }
+    });
+
+    const uniqueWeekday = [...new Set(weekdayTimes)];
+    let weekdayStr;
+    if (uniqueWeekday.length === 1) {
+      weekdayStr = `평일: ${uniqueWeekday[0]}`;
+    } else {
+      weekdayStr = `평일: 요일별 영업시간 다름`;
+    }
+
+    const result = [weekdayStr];
+    result.push(...weekendTimes);
+    if (sundayTime) {
+      result.push(`일요일: ${sundayTime}`);
+    }
+    return result;
   };
 
   if (!symptom || !department) {
@@ -171,7 +224,7 @@ const MapPage = () => {
       {/* 요약 패널 */}
       <div className={`map-top-overlay ${isSummaryOpen ? '' : 'closed'}`}>
         <img
-          src={isSummaryOpen ? "/images/left.png" : "/images/right.png"}
+          src="/images/stic2.png"
           className="summary-toggle-icon"
           onClick={() => setIsSummaryOpen(prev => !prev)}
           alt="toggle summary"
@@ -186,37 +239,48 @@ const MapPage = () => {
       {/* bottom sheet */}
       <div className={`bottom-sheet ${isSheetOpen ? 'open' : ''}`}>
         <img
-          src={isSheetOpen ? "/images/up.png" : "/images/down.png"}
+          src="/images/stic.png"
           className="bottom-sheet-toggle-btn"
           onClick={() => setIsSheetOpen(prev => !prev)}
           alt="toggle hospital list"
         />
         <div className="hospital-list">
-          {recommendedHospitals.length === 0 ? (
+          {hospitalList.length === 0 ? (
             <div className="hospital-empty">
-              추천된 병원이 없습니다.<br/>
+              추천된 병원이 없습니다.<br />
               다른 증상으로 검색해보세요!
             </div>
           ) : (
-            recommendedHospitals.map((h, idx) => {
-              const isSelected =
-                selectedHospital && selectedHospital.placeName === h.placeName;
+            hospitalList.map((h, idx) => {
+              const isSelected = selectedHospital && selectedHospital.placeName === h.placeName;
               return (
-                <div key={idx} className="hospital-item-card">
+                <div
+                  key={idx}
+                  className={`hospital-item-card ${isSelected ? "selected" : ""}`}
+                >
                   <div className="hospital-card-header">
-                    <strong>{h.placeName || '이름 없음'}</strong>
-                    <span>{h.distance ? `${h.distance}m` : '거리정보 없음'}</span>
+                    <strong>{h.placeName || "이름 없음"}</strong>
+                    <span>{h.distance ? `${h.distance}m` : "거리정보 없음"}</span>
                   </div>
                   <div className="hospital-card-body">
-                    <div>{h.addressName || '주소 정보 없음'}</div>
-                    <div>📞 {h.phone || '전화번호 준비 중'}</div>
+                    <div>{h.addressName || "주소 정보 없음"}</div>
+                    <div>📞 {h.phone || "전화번호 준비 중"}</div>
+                    <div>
+                      <ul style={{ margin: 0, paddingLeft: "1rem" }}>
+                        {formatOpeningHours(h.openingHours).map((line, idx2) => (
+                          <li key={idx2}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
                     <button
                       className="navigate-btn"
-                      onClick={() => handleRoute({
-                        ...h,
-                        lat: Number(h.y),
-                        lng: Number(h.x)
-                      })}
+                      onClick={() =>
+                        handleRoute({
+                          ...h,
+                          lat: Number(h.y),
+                          lng: Number(h.x),
+                        })
+                      }
                     >
                       🚗 길찾기
                     </button>
